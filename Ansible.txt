@@ -1,0 +1,525 @@
+------------------------------------------------------------------------
+
+# Install Ansible
+
+## In AWS EC2 Instance
+yum -y install ansible --enablerepo=epel
+## Local Machine Ansible Setup
+yum install https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm -y
+yum --enablerepo=epel install ansible -y
+
+## Add this to work with AWS
+yum --enablerepo=epel install python2-boto -y
+yum -y install python-pip
+pip install boto
+pip install boto3
+
+## Testing
+ansible --version
+
+ansible localhost -m ping
+
+------------------------------------------------------------------------
+
+# Configuration file
+
+grep -v ^$ /etc/ansible/ansible.cfg | grep -v ^#
+grep -A20 "\[defaults\]" /etc/ansible/ansible.cfg | grep -v ^$
+
+egrep "\#remote_user|\#timeout" /etc/ansible/ansible.cfg
+
+------------------------------------------------------------------------
+
+# Create user to replicate remote machine
+
+## Password based login
+groupadd user
+adduser -g user user1
+passwd user1
+
+## Passwordless login
+adduser -g user user2
+passwd user2
+
+## Set up password based login
+cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bck
+sed -i "s/PasswordAuthentication no/PasswordAuthentication yes/g" /etc/ssh/sshd_config
+service sshd restart
+
+## Allow user1 to have password less sudo access
+echo "user1 ALL=(ALL)       NOPASSWD: ALL" >> /etc/sudoers
+echo "user2 ALL=(ALL)       NOPASSWD: ALL" >> /etc/sudoers
+
+ssh-keygen -t rsa
+echo "ssh user2@$(hostname -i) mkdir -p .ssh" |sh
+echo "ssh-copy-id -i ~/.ssh/id_rsa.pub user2@$(hostname -i)" |sh
+
+------------------------------------------------------------------------
+
+# Create Inventory (Static)
+
+echo '# My Host File' > host
+echo '' >> host
+echo '[group1]' >> host
+echo "$(hostname) ansible_user=user1 ansible_ssh_pass=password" >> host
+echo '' >> host
+echo '[group2]' >> host
+echo "$(hostname -i) ansible_user=user2" >> host
+
+cat host
+
+------------------------------------------------------------------------
+
+# Target hosts from inventory
+
+ansible all -i host -m ping
+
+ansible group2 -i host -m ping
+
+ansible *172* -i host -m ping
+
+------------------------------------------------------------------------
+
+# Execute adhoc command
+
+#ssh user2@$(hostname -i) touch file
+
+ansible group2 -i host -m command -a "ls -ltr"
+ansible all -i host -m command -a "id"
+
+ansible group2 -i host -m setup
+
+ansible group2 -i host -m yum -a "name=httpd state=latest" -b
+
+ansible group2 -i host -m service -a "name=httpd state=started" -b
+
+ansible group2 -i host -m service -a "name=httpd state=started" -b (Ansible Idempotent, changed: false, no fatal error)
+
+ansible group2 -i host -m service -a "name=httpd state=stopped" -b
+
+ansible group2 -i host -m yum -a "name=httpd state=absent" -b
+
+------------------------------------------------------------------------
+
+# Ansible Module help
+
+## Search Module
+ansible-doc -l | grep win
+
+## Module man page
+ansible-doc yum
+
+------------------------------------------------------------------------
+
+# Playbook Introduction
+
+cat play1.yml
+---
+- name: Sample Playbook
+  hosts: group2
+
+ansible-playbook -i host play1.yml
+
+cat play2.yml
+---
+- name: Sample Playbook
+  hosts: group2
+  become: yes
+  tasks:
+    - name: Install MySQL Server
+      yum: name=mysql-server state=latest
+
+    - name: Start Server
+      service: name=mysqld state=started
+
+ansible-playbook -i host play2.yml
+
+------------------------------------------------------------------------
+
+# Condition
+
+cat play3.yml
+---
+- name: Sample Playbook
+  hosts: group2
+
+  tasks:
+    - name: Echo if Redhat
+      shell: echo "This is a Redhat Linux host."
+      register: is_redhat
+
+    - debug: msg=is_redhat.stdout
+
+ansible-playbook -i host play3.yml
+
+------------------------------------------------------------------------
+
+# Loop
+
+cat play4.yml
+---
+- name: Sample Playbook
+  hosts: group2
+
+  tasks:
+    - name: Test Loop
+      copy: src=test.txt dest=test.{{ item }}.txt
+      with_items:
+        - 1
+        - 2
+
+ansible-playbook -i host play4.yml
+
+ansible group2 -i host -m command -a 'ls -ltr'
+
+------------------------------------------------------------------------
+
+# Block and Error Handling
+
+cat play6.yml
+---
+- name: Sample Playbook
+  hosts: group2
+
+  tasks:
+  - block:
+    - name: Print start
+      debug: msg='Start'
+
+    - name: Try to copy
+      copy: src=test.txt dest=super.txt
+
+    rescue:
+    - name: Print Error
+      debug: msg='Error'
+
+    always:
+    - name: End message
+      debug: msg='End'
+
+ansible-playbook -i host play6.yml
+
+------------------------------------------------------------------------
+
+# Template
+
+cat play7.yml
+---
+- name: Sample Playbook
+  hosts: group2
+
+  tasks:
+  - name: Create a templeted file
+    template: src=heading.txt.j2 dest=nice.txt
+
+ansible-playbook -i host play7.yml
+
+------------------------------------------------------------------------
+
+# Correct Ansible project setup
+
+## Project workspace setup
+mkdir project01 project01/group_vars project01/host_vars project01/roles
+cd project01
+cp /etc/ansible/hosts /etc/ansible/ansible.cfg .
+touch main.yml
+
+## Create host file
+echo -e "[db]\n$(hostname)\n\n[web]\n$(hostname -i)\n\n[app:children]\nweb\ndb" > hosts
+cat hosts
+
+## Create host variable
+echo -e "---\nansible_user: user1\nansible_ssh_pass: password" > host_vars/$(hostname)
+echo -e "---\nansible_user: user2" > host_vars/$(hostname -i)
+grep -v ^$ host_vars/*
+
+## Create group variable
+echo -e "---\napp_name: sampleapp" > group_vars/app
+cat group_vars/app
+
+## Test host setup
+ansible all -i hosts -m command -a 'id'
+
+## Test group setup
+cat main.yml
+---
+- name: Test Playbook
+  hosts: web
+
+  tasks:
+  - name: Test group variable
+    shell: echo 'Application is sampleapp'
+    when: app_name=='sampleapp'
+    register: echo_out
+
+  - name: Print result
+    debug: msg=echo_out.stdout
+
+ansible-playbook -i hosts main.yml
+
+------------------------------------------------------------------------
+
+# Include
+
+cat main.yml
+---
+- name: Main Task
+  debugger: on_failed
+  hosts: web
+
+  tasks:
+  - debug:
+    msg: 'Start Play'
+
+  - name: 'Include Play'
+    include: sub_task.yml
+
+  - debug:
+    msg: 'End Play'
+
+- name: Include Playbook
+  import_playbook: sub_play.yml
+
+cat sub_task.yml
+- name: Executing sub task
+  shell: ls
+
+- name: Print
+  debug: msg='Sub Task'
+
+cat sub_play.yml
+---
+- name: Sub Task
+  hosts: db
+  tasks:
+  - name: Executing sub task
+    shell: ls
+
+  - name: Print
+    debug: msg='Sub Task'
+
+ansible-playbook -i hosts main.yml
+
+
+------------------------------------------------------------------------
+
+# Role creation
+
+cd /root/project01/roles
+
+ansible-galaxy init ntpd
+
+grep ntpserver ntpd/templates/ntp.conf.j2
+server {{ ntpserver }} prefer iburst minpoll 3
+
+cat ntpd/vars/main.yml
+---
+ntpserver: 169.254.169.123
+
+cat ntpd/handlers/main.yml
+---
+- name: restart ntp
+  service: name=ntpd state=restart
+
+cat ntpd/tasks/ntpd.yml
+---
+- name: install ntp server
+  yum: name=ntp state=present
+
+- name: configure ntp server
+  template: src=ntp.conf.j2 dest=/etc/ntp.conf
+  notify: restart ntp
+
+- name: start ntp service
+  service: name=ntpd state=started enabled=true
+
+cat ntpd/tasks/main.yml
+---
+- include: ntpd.yml
+
+cat site.yml
+---
+- name: deploy NTP Service
+  hosts: db
+  become: yes
+  roles:
+  - ntpd
+
+
+ansible-playbook -i hosts site.yml
+
+------------------------------------------------------------------------
+
+# Debug playbook
+
+cat host
+# My Host File
+
+[group1]
+<HOST01> ansible_user=user1 ansible_ssh_pass=password
+
+[group2]
+<HOST02> ansible_user=user3
+
+cat play.yml
+---
+- name: Sample Playbook
+  hosts: group2
+  become: yes
+  tasks:
+    - name: Install MySQL Server
+      yum: name=mysql-server state=latest
+
+    - name: Start Server
+      service: name=mysqld state=started
+
+ansible-playbook -i host play.yml -vvvv
+
+------------------------------------------------------------------------
+
+# Error Handling
+
+## No Error Handling
+cat play.yml
+---
+- name: Sample Playbook
+  hosts: group2
+
+  tasks:
+    - name: Install MySQL Server
+      yum: name=mysql-server state=latest
+
+    - name: Following Task
+      shell: echo Hello World
+      register: output
+
+    - debug:
+      msg: output.stdout
+
+ansible-playbook -i host play.yml
+
+## No Error Handling
+cat play.yml
+---
+- name: Sample Playbook
+  hosts: group2
+
+  tasks:
+    - name: Install MySQL Server
+      yum: name=mysql-server state=latest
+      ignore_errors: yes
+
+    - name: Following Task
+      shell: echo Hello World
+      register: output
+
+    - debug:
+      msg: output.stdout
+
+ansible-playbook -i host play.yml
+
+------------------------------------------------------------------------
+
+# Troubleshooting Step
+
+cat play.yml
+---
+- name: Sample Playbook
+  hosts: group2
+
+  tasks:
+    - name: First Task
+      shell: echo Step 1
+      register: one
+
+    - debug:
+      msg: one.stdout
+
+    - name: Second Task
+      shell: echo Step 2
+      register: two
+
+    - debug:
+      msg: two.stdout
+
+ansible-playbook -i host play.yml --start-at="Second Task"
+
+ansible-playbook -i host play.yml --step
+
+------------------------------------------------------------------------
+
+  AWS With Ansible
+
+------------------------------------------------------------------------
+
+## Set System Time
+yum install ntpdate
+ntpdate us.pool.ntp.org
+
+## Setup Authentication
+#export AWS_ACCESS_KEY_ID="YOUR_ID"
+#export AWS_SECRET_ACCESS_KEY="YOUR_SECRET"
+export ANSIBLE_HOST_KEY_CHECKING=False
+
+## Setting up default login for EC2 Instance
+cp /etc/ansible/ansible.cfg .
+echo "remote_user = ec2-user" >> ~/ansible.cfg
+echo "private_key_file = /root/US-EAST-KEY.pem" >> ~/ansible.cfg
+echo "host_key_checking = False" >> ~/ansible.cfg
+
+## Setup Dynamic Inventry Script
+wget https://raw.githubusercontent.com/ansible/ansible/devel/contrib/inventory/ec2.py
+wget https://raw.githubusercontent.com/ansible/ansible/devel/contrib/inventory/ec2.ini
+chmod +x ec2.py
+
+## Check Inventry Lookup Works
+./ec2.py --refresh-cache
+./ec2.py --list
+
+## Create EC2 Instance
+cat play_aws_ec2.yml
+---
+- name: Create an CentOS instance on Amazon EC2
+  hosts: localhost
+  tasks:
+
+  - name: SSH security group
+    ec2_group:
+      name: ssh
+      description: allow SSH access
+      region: us-west-1
+      rules:
+        - proto: tcp
+          from_port: 22
+          to_port: 22
+          cidr_ip: 0.0.0.0/0
+
+  - name: Outbound security group
+    ec2_group:
+      name: outbound
+      description: allow outbound connections to the internet
+      region: us-west-1
+      rules_egress:
+        - proto: all
+          cidr_ip: 0.0.0.0/0
+
+  - name: EC2 Instance Creation
+    ec2:
+      image: ami-46e1f226
+      region: us-west-1
+      instance_type: t2.micro
+      key_name: US-EAST-KEY
+      group: [ "ssh", "outbound" ]
+      instance_tags: { Name: ansiblebook, type: web, env: production }
+    register: ec2_info
+
+  - name: Log creation
+    debug: var={{ ec2_info | to_json }}
+
+ansible-playbook play_aws_ec2.yml
+
+## Ansible Dynamic inventory
+Instance with Tag "type=web", can be addressed with ansible group tag_type_web
+
+## Validate Creation Working
+ansible -i ec2.py tag_type_web -m ping
