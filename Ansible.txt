@@ -30,7 +30,7 @@ egrep "\#remote_user|\#timeout" /etc/ansible/ansible.cfg
 
 ------------------------------------------------------------------------
 
-# Create user to replicate remote machine
+# Create user to replicate multiple remote machines
 
 ## Password based login
 groupadd user
@@ -41,18 +41,13 @@ passwd user1
 adduser -g user user2
 passwd user2
 
-## Set up password based login
-cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bck
-sed -i "s/PasswordAuthentication no/PasswordAuthentication yes/g" /etc/ssh/sshd_config
-service sshd restart
-
 ## Allow user1 to have password less sudo access
 echo "user1 ALL=(ALL)       NOPASSWD: ALL" >> /etc/sudoers
 echo "user2 ALL=(ALL)       NOPASSWD: ALL" >> /etc/sudoers
 
 ssh-keygen -t rsa
-echo "ssh user2@$(hostname -i) mkdir -p .ssh" |sh
-echo "ssh-copy-id -i ~/.ssh/id_rsa.pub user2@$(hostname -i)" |sh
+echo "ssh user2@$client mkdir -p .ssh" |sh
+echo "ssh-copy-id -i ~/.ssh/id_rsa.pub user2@$client" |sh
 
 ------------------------------------------------------------------------
 
@@ -61,10 +56,10 @@ echo "ssh-copy-id -i ~/.ssh/id_rsa.pub user2@$(hostname -i)" |sh
 echo '# My Host File' > host
 echo '' >> host
 echo '[group1]' >> host
-echo "$(hostname) ansible_user=user1 ansible_ssh_pass=password" >> host
+echo "client ansible_user=user2" >> host
 echo '' >> host
 echo '[group2]' >> host
-echo "$(hostname -i) ansible_user=user2" >> host
+echo "$(ping -q -c 1 -t 1 client | grep ^PING | awk -F'(' '{ print $2 }' | awk -F')' '{ print $1 }') ansible_user=user1  ansible_ssh_pass=x" >> host
 
 cat host
 
@@ -76,13 +71,13 @@ ansible all -i host -m ping
 
 ansible group2 -i host -m ping
 
-ansible *172* -i host -m ping
+ansible *192* -i host -m ping
 
 ------------------------------------------------------------------------
 
 # Execute adhoc command
 
-#ssh user2@$(hostname -i) touch file
+#ssh user2@$client touch file
 
 ansible group2 -i host -m command -a "ls -ltr"
 ansible all -i host -m command -a "id"
