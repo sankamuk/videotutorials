@@ -166,14 +166,12 @@ cat play.yml
 cat play3.yml
 ---
 - name: Sample Playbook
-  hosts: group2
-
+  hosts: client
   tasks:
     - name: Echo if Redhat
-      shell: echo "This is a Redhat Linux host."
-      register: is_redhat
-
-    - debug: msg=is_redhat.stdout
+      shell: echo "This is a CentOS Linux host."
+      when: ansible_distribution=="CentOS"
+      #when: ansible_distribution=="RedHat"
 
 ansible-playbook -i host play3.yml
 
@@ -200,6 +198,27 @@ ansible group2 -i host -m command -a 'ls -ltr'
 ------------------------------------------------------------------------
 
 # Block and Error Handling
+
+## Without Error Handling
+
+cat play6.yml 
+---
+- name: Sample Playbook
+  hosts: client
+
+  tasks:
+  - name: Print start
+    debug: msg='Start'
+
+  - name: Try to copy
+    copy: src=test.txt dest=super.txt
+
+  - name: Print End
+    debug: msg='End'
+
+ansible-playbook -i host play6.yml
+
+## With Error Handling
 
 cat play6.yml
 ---
@@ -228,6 +247,8 @@ ansible-playbook -i host play6.yml
 
 # Template
 
+echo "This is a {{ ansible_distribution }} host." > heading.txt.j2
+
 cat play7.yml
 ---
 - name: Sample Playbook
@@ -241,48 +262,6 @@ ansible-playbook -i host play7.yml
 
 ------------------------------------------------------------------------
 
-# Correct Ansible project setup
-
-## Project workspace setup
-mkdir project01 project01/group_vars project01/host_vars project01/roles
-cd project01
-cp /etc/ansible/hosts /etc/ansible/ansible.cfg .
-touch main.yml
-
-## Create host file
-echo -e "[db]\n$(hostname)\n\n[web]\n$(hostname -i)\n\n[app:children]\nweb\ndb" > hosts
-cat hosts
-
-## Create host variable
-echo -e "---\nansible_user: user1\nansible_ssh_pass: password" > host_vars/$(hostname)
-echo -e "---\nansible_user: user2" > host_vars/$(hostname -i)
-grep -v ^$ host_vars/*
-
-## Create group variable
-echo -e "---\napp_name: sampleapp" > group_vars/app
-cat group_vars/app
-
-## Test host setup
-ansible all -i hosts -m command -a 'id'
-
-## Test group setup
-cat main.yml
----
-- name: Test Playbook
-  hosts: web
-
-  tasks:
-  - name: Test group variable
-    shell: echo 'Application is sampleapp'
-    when: app_name=='sampleapp'
-    register: echo_out
-
-  - name: Print result
-    debug: msg=echo_out.stdout
-
-ansible-playbook -i hosts main.yml
-
-------------------------------------------------------------------------
 
 # Include
 
@@ -329,6 +308,49 @@ ansible-playbook -i hosts main.yml
 ----------------------------------------------------------------------------------------------------------------------------------------
   ROLES
 ----------------------------------------------------------------------------------------------------------------------------------------
+
+# Correct Ansible project setup
+
+## Project workspace setup
+mkdir project01 project01/group_vars project01/host_vars project01/roles
+cd project01
+cp /etc/ansible/hosts /etc/ansible/ansible.cfg .
+touch main.yml
+
+## Create host file
+echo -e "[db]\n$(hostname)\n\n[web]\n$(hostname -i)\n\n[app:children]\nweb\ndb" > hosts
+cat hosts
+
+## Create host variable
+echo -e "---\nansible_user: user1\nansible_ssh_pass: password" > host_vars/$(hostname)
+echo -e "---\nansible_user: user2" > host_vars/$(hostname -i)
+grep -v ^$ host_vars/*
+
+## Create group variable
+echo -e "---\napp_name: sampleapp" > group_vars/app
+cat group_vars/app
+
+## Test host setup
+ansible all -i hosts -m command -a 'id'
+
+## Test group setup
+cat main.yml
+---
+- name: Test Playbook
+  hosts: web
+
+  tasks:
+  - name: Test group variable
+    shell: echo 'Application is sampleapp'
+    when: app_name=='sampleapp'
+    register: echo_out
+
+  - name: Print result
+    debug: msg=echo_out.stdout
+
+ansible-playbook -i hosts main.yml
+
+------------------------------------------------------------------------
 
 # Role creation
 
