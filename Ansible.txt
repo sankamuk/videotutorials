@@ -147,6 +147,20 @@ ansible-playbook -i host play2.yml
   PLAYBOOK CONTROL FLOW
 ----------------------------------------------------------------------------------------------------------------------------------------
 
+# Host details gathered before task execution
+
+ansible -i hosts client -u user2 -m setup
+
+# Disable default fact gathering
+
+cat play.yml
+---
+- name: Sample Playbook
+  hosts: client
+  gather_facts: no
+
+------------------------------------------------------------------------
+
 # Condition
 
 cat play3.yml
